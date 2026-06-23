@@ -89,7 +89,7 @@
     -- ============================================
     -- GUI ДЛЯ ВВОДА КЛЮЧА
     -- ============================================
-    local function createKeyGUI()
+    local function createKeyGUI(callback)
         local ScreenGui = Instance.new("ScreenGui")
         ScreenGui.Name = "KeyLoaderGUI"
         ScreenGui.ResetOnSpawn = false
@@ -300,10 +300,13 @@
                 SubmitButton.BackgroundColor3 = Color3.fromRGB(50, 255, 100)
                 InputStroke.Color = Color3.fromRGB(50, 255, 100)
                 
-                keyValidated = true
-                
                 task.wait(0.5)
                 StatusLabel.Text = "📦 Загружаем ESP..."
+                
+                -- Сохраняем переменные ПЕРЕД вызовом callback
+                _G.ESP_USER_KEY = enteredKey
+                _G.ESP_SERVER_URL = SERVER_URL
+                
                 task.wait(0.3)
                 
                 -- Анимация исчезновения
@@ -316,6 +319,13 @@
                 )
                 task.wait(0.4)
                 ScreenGui:Destroy()
+                
+                -- Вызываем callback для продолжения загрузки
+                if callback then
+                    task.spawn(function()
+                        callback(true, enteredKey)
+                    end)
+                end
             else
                 StatusLabel.Text = "❌ " .. message
                 StatusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
@@ -331,19 +341,14 @@
                 InputStroke.Color = Color3.fromRGB(55, 55, 65)
             end
         end)
-        
-        -- Ждём валидации
-        repeat
-            task.wait(0.1)
-        until keyValidated
-        
-        return true
     end
 
     -- ============================================
     -- ЗАГРУЗКА ОСНОВНОГО ESP КОДА
     -- ============================================
     local function loadMainScript()
+        task.wait(0.5) -- Небольшая задержка для стабильности
+        
         print("[LOADER] Загрузка основного ESP кода с GitHub...")
         print("[LOADER] URL:", SCRIPT_URL)
         
@@ -366,8 +371,11 @@
                 scriptCode = game:HttpGet(SCRIPT_URL, true)
             end
             
+            if not scriptCode or scriptCode == "" then
+                error("Пустой ответ от сервера")
+            end
+            
             print("[LOADER] Скрипт загружен, размер:", #scriptCode, "символов")
-            print("[LOADER] Первые 200 символов:", scriptCode:sub(1, 200))
             
             -- Выполняем загруженный код
             local loadFunc, err = loadstring(scriptCode)
@@ -376,7 +384,14 @@
             end
             
             print("[LOADER] Скрипт скомпилирован, запускаем...")
-            loadFunc()
+            
+            -- ВАЖНО: Запускаем в отдельном потоке
+            task.spawn(function()
+                local execSuccess, execErr = pcall(loadFunc)
+                if not execSuccess then
+                    warn("[LOADER] Ошибка выполнения:", execErr)
+                end
+            end)
         end)
         
         if not success then
@@ -393,20 +408,20 @@
     -- ГЛАВНАЯ ФУНКЦИЯ
     -- ============================================
     local function main()
-        -- 1. Показываем GUI для ввода ключа
-        local keyValid = createKeyGUI()
-        
-        if not keyValid then
-            player:Kick("❌ Доступ запрещён")
-            return
-        end
-        
-        -- 2. Сохраняем ключ в глобальную переменную для основного скрипта
-        _G.ESP_USER_KEY = USER_KEY
-        _G.ESP_SERVER_URL = SERVER_URL
-        
-        -- 3. Загружаем основной ESP код
-        loadMainScript()
+        -- 1. Показываем GUI для ввода ключа с callback
+        createKeyGUI(function(success, key)
+            if not success then
+                player:Kick("❌ Доступ запрещён")
+                return
+            end
+            
+            -- 2. Сохраняем ключ в глобальную переменную для основного скрипта
+            _G.ESP_USER_KEY = key
+            _G.ESP_SERVER_URL = SERVER_URL
+            
+            -- 3. Загружаем основной ESP код
+            loadMainScript()
+        end)
     end
 
     -- Запуск
