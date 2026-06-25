@@ -10,10 +10,8 @@ local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local player = Players.LocalPlayer
 
--- Load Fluent UI Library
-local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
-local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
-local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
+-- Key Storage
+local KeyStorageFile = "FirmaModeKey.txt"
 
 -- Utility Functions
 local function makeRequest(endpoint, data)
@@ -28,6 +26,90 @@ local function makeRequest(endpoint, data)
     end)
     return success and result or nil
 end
+
+local function saveKey(key)
+    local success = pcall(function()
+        writefile(KeyStorageFile, key)
+    end)
+    return success
+end
+
+local function loadKey()
+    local success, key = pcall(function()
+        return readfile(KeyStorageFile)
+    end)
+    return success and key or nil
+end
+
+local function deleteKey()
+    pcall(function()
+        delfile(KeyStorageFile)
+    end)
+end
+
+local function loadMainScript(token)
+    local scriptCode
+    if token and token ~= "" then
+        local ok, result = pcall(function()
+            return request({
+                Url = SCRIPT_URL,
+                Method = "GET",
+                Headers = {["Authorization"] = "token " .. token}
+            }).Body
+        end)
+        if ok then scriptCode = result end
+    else
+        local ok, result = pcall(function()
+            return game:HttpGet(SCRIPT_URL, true)
+        end)
+        if ok then scriptCode = result end
+    end
+    
+    if scriptCode then
+        local loadFunc = loadstring(scriptCode)
+        if loadFunc then
+            loadFunc()
+            return true
+        end
+    end
+    return false
+end
+
+-- Try auto-login with saved key
+local savedKey = loadKey()
+if savedKey then
+    print("🔑 Найден сохраненный ключ, проверка...")
+    
+    local hwid = game:GetService("RbxAnalyticsService"):GetClientId()
+    local response = makeRequest("/api/validate", {
+        key = savedKey,
+        hwid = hwid,
+        userId = player.UserId,
+        game = game.PlaceId
+    })
+    
+    if response and response.success then
+        print("✅ Ключ валидный! Автоматический вход...")
+        _G.ESP_USER_KEY = savedKey
+        _G.ESP_GITHUB_TOKEN = response.githubToken
+        
+        if loadMainScript(response.githubToken) then
+            print("✅ ESP загружен автоматически!")
+            return -- Exit script, don't show GUI
+        end
+    else
+        print("❌ Сохраненный ключ больше не действителен")
+        deleteKey()
+    end
+end
+
+-- If we're here, show the key loader GUI
+print("📱 Загрузка GUI для ввода ключа...")
+
+-- Load Fluent UI Library
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
+local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
 
 -- Create Window
 local Window = Fluent:CreateWindow({
@@ -133,6 +215,11 @@ Tabs.Main:AddButton({
                 Duration = 3
             })
             
+            -- Save key for future use
+            if saveKey(keyInput) then
+                print("💾 Ключ сохранен для автоматического входа")
+            end
+            
             task.wait(1)
             
             -- Set global variables
@@ -140,45 +227,18 @@ Tabs.Main:AddButton({
             _G.ESP_GITHUB_TOKEN = response.githubToken
             
             -- Load main script
-            local scriptCode
-            if response.githubToken and response.githubToken ~= "" then
-                local ok, result = pcall(function()
-                    return request({
-                        Url = SCRIPT_URL,
-                        Method = "GET",
-                        Headers = {["Authorization"] = "token " .. response.githubToken}
-                    }).Body
-                end)
-                if ok then scriptCode = result end
-            else
-                local ok, result = pcall(function()
-                    return game:HttpGet(SCRIPT_URL, true)
-                end)
-                if ok then scriptCode = result end
-            end
-            
-            if scriptCode then
-                local loadFunc = loadstring(scriptCode)
-                if loadFunc then
-                    Fluent:Notify({
-                        Title = "🎉 Успешно!",
-                        Content = "ESP система запущена!",
-                        Duration = 3
-                    })
-                    task.wait(1)
-                    Window:Destroy()
-                    loadFunc()
-                else
-                    Fluent:Notify({
-                        Title = "❌ Ошибка",
-                        Content = "Не удалось загрузить скрипт",
-                        Duration = 5
-                    })
-                end
+            if loadMainScript(response.githubToken) then
+                Fluent:Notify({
+                    Title = "🎉 Успешно!",
+                    Content = "ESP система запущена!",
+                    Duration = 3
+                })
+                task.wait(1)
+                Window:Destroy()
             else
                 Fluent:Notify({
                     Title = "❌ Ошибка",
-                    Content = "Не удалось скачать скрипт с сервера",
+                    Content = "Не удалось загрузить скрипт",
                     Duration = 5
                 })
             end
@@ -231,6 +291,19 @@ Tabs.Credits:AddParagraph({
 Tabs.Credits:AddParagraph({
     Title = "⚙️ Возможности ESP",
     Content = "• ESP на легендарные вещи\n• ESP на аксессуары\n• Чамсы и трассеры\n• Спидхак\n• Fast Take\n• Автообновление"
+})
+
+Tabs.Credits:AddButton({
+    Title = "🗑️ Удалить сохраненный ключ",
+    Description = "Очистить кэш и выйти из аккаунта",
+    Callback = function()
+        deleteKey()
+        Fluent:Notify({
+            Title = "✅ Успешно",
+            Content = "Сохраненный ключ удален. При следующем запуске нужно будет ввести ключ заново.",
+            Duration = 5
+        })
+    end
 })
 
 -- Welcome notification
