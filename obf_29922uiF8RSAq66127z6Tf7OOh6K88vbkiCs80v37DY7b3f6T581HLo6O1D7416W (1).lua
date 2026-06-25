@@ -212,7 +212,7 @@ Tabs.Main:AddButton({
             Fluent:Notify({
                 Title = "✅ Ключ активирован!",
                 Content = "Загрузка ESP системы...",
-                Duration = 3
+                Duration = 2
             })
             
             -- Save key for future use
@@ -220,27 +220,23 @@ Tabs.Main:AddButton({
                 print("💾 Ключ сохранен для автоматического входа")
             end
             
-            task.wait(1)
+            task.wait(0.5)
             
             -- Set global variables
             _G.ESP_USER_KEY = keyInput
             _G.ESP_GITHUB_TOKEN = response.githubToken
             
+            -- Close window BEFORE loading script
+            pcall(function() 
+                Window:Destroy() 
+            end)
+            task.wait(0.5)
+            
             -- Load main script
             if loadMainScript(response.githubToken) then
-                Fluent:Notify({
-                    Title = "🎉 Успешно!",
-                    Content = "ESP система запущена!",
-                    Duration = 3
-                })
-                task.wait(1)
-                Window:Destroy()
+                print("✅ ESP загружен успешно!")
             else
-                Fluent:Notify({
-                    Title = "❌ Ошибка",
-                    Content = "Не удалось загрузить скрипт",
-                    Duration = 5
-                })
+                player:Kick("❌ Не удалось загрузить ESP. Попробуйте снова.")
             end
         else
             local errorMsg = response and response.message or "Неверный ключ или истек срок действия"
