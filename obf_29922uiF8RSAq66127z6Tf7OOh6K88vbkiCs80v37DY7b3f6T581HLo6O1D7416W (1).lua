@@ -53,36 +53,91 @@ local function deleteKey()
 end
 
 local function loadScript(token)
+    print("[LOAD SCRIPT] Начинаем загрузку с:", SCRIPT_URL)
+    print("[LOAD SCRIPT] Token:", token and "есть" or "нет")
+    
     local code
     if token and token ~= "" then
+        print("[LOAD SCRIPT] Пытаемся загрузить с токеном (приватный репо)")
         local ok, r = pcall(function()
             return request({Url = SCRIPT_URL, Method = "GET", Headers = {["Authorization"] = "token " .. token}}).Body
         end)
-        if ok then code = r end
+        if ok then 
+            code = r
+            print("[LOAD SCRIPT] ✅ Загружено с токеном, размер:", #code)
+        else
+            warn("[LOAD SCRIPT] ❌ Ошибка загрузки с токеном:", r)
+        end
     else
+        print("[LOAD SCRIPT] Пытаемся загрузить без токена (публичный репо)")
         local ok, r = pcall(function() return game:HttpGet(SCRIPT_URL, true) end)
-        if ok then code = r end
+        if ok then 
+            code = r
+            print("[LOAD SCRIPT] ✅ Загружено без токена, размер:", #code)
+        else
+            warn("[LOAD SCRIPT] ❌ Ошибка загрузки без токена:", r)
+        end
     end
+    
     if code then
-        local f = loadstring(code)
-        if f then f() return true end
+        print("[LOAD SCRIPT] Проверяем код...")
+        print("[LOAD SCRIPT] Первые 200 символов:", code:sub(1, 200))
+        
+        local f, err = loadstring(code)
+        if f then 
+            print("[LOAD SCRIPT] ✅ Код скомпилирован, запускаем...")
+            local runOk, runErr = pcall(f)
+            if runOk then
+                print("[LOAD SCRIPT] ✅ Скрипт запущен успешно!")
+                return true
+            else
+                warn("[LOAD SCRIPT] ❌ Ошибка выполнения скрипта:", runErr)
+                return false
+            end
+        else
+            warn("[LOAD SCRIPT] ❌ Ошибка компиляции:", err)
+            return false
+        end
+    else
+        warn("[LOAD SCRIPT] ❌ Не удалось получить код")
+        return false
     end
-    return false
 end
 
 -- Auto-login
+print("[AUTO-LOGIN] Проверяем сохраненный ключ...")
 local savedKey = loadKey()
 if savedKey then
+    print("[AUTO-LOGIN] Найден сохраненный ключ:", savedKey)
     local hwid = game:GetService("RbxAnalyticsService"):GetClientId()
+    print("[AUTO-LOGIN] HWID:", hwid)
+    print("[AUTO-LOGIN] Отправляем запрос на проверку...")
+    
     local res = makeRequest("/api/validate", {key = savedKey, hwid = hwid, userId = player.UserId, game = game.PlaceId})
+    
     if res and res.success then
+        print("[AUTO-LOGIN] ✅ Ключ валидный! Автозагрузка...")
         _G.ESP_USER_KEY = savedKey
+        _G.ESP_SERVER_URL = SERVER_URL
         _G.ESP_GITHUB_TOKEN = res.githubToken
-        if loadScript(res.githubToken) then return end
+        print("[AUTO-LOGIN] Глобальные переменные установлены")
+        print("[AUTO-LOGIN] Загружаем скрипт...")
+        
+        if loadScript(res.githubToken) then
+            print("[AUTO-LOGIN] ✅ ESP загружен через автовход!")
+            return
+        else
+            warn("[AUTO-LOGIN] ❌ Не удалось загрузить ESP")
+        end
     else
+        print("[AUTO-LOGIN] ❌ Ключ невалидный или истек, удаляем...")
         deleteKey()
     end
+else
+    print("[AUTO-LOGIN] Сохраненный ключ не найден")
 end
+
+print("[AUTO-LOGIN] Показываем Key System GUI...")
 
 -- Load Fluent UI
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
@@ -135,11 +190,14 @@ Tabs.Main:AddButton({
             return
         end
         
-        print("[KEY LOADER] Начинаем проверку ключа:", keyInput)
+        print("[KEY LOADER] ===== НАЧАЛО АКТИВАЦИИ =====")
+        print("[KEY LOADER] Ключ:", keyInput)
         Fluent:Notify({Title = "⏳ Проверка", Content = "Проверка ключа на сервере...", Duration = 3})
         
         local hwid = game:GetService("RbxAnalyticsService"):GetClientId()
         print("[KEY LOADER] HWID:", hwid)
+        print("[KEY LOADER] UserID:", player.UserId)
+        print("[KEY LOADER] PlaceID:", game.PlaceId)
         
         local requestData = {
             key = keyInput,
@@ -148,52 +206,58 @@ Tabs.Main:AddButton({
             game = game.PlaceId
         }
         
-        print("[KEY LOADER] Отправка запроса...")
+        print("[KEY LOADER] Отправка запроса на сервер...")
         local res = makeRequest("/api/validate", requestData)
         
         if not res then
             print("[KEY LOADER] ❌ Сервер не ответил")
-            Fluent:Notify({Title = "❌ Ошибка", Content = "Сервер не отвечает", Duration = 5})
+            Fluent:Notify({Title = "❌ Ошибка", Content = "Сервер не отвечает. Проверьте консоль (F9)", Duration = 5})
             return
         end
         
-        print("[KEY LOADER] Ответ получен. Success:", res.success)
+        print("[KEY LOADER] Ответ сервера:")
+        print("[KEY LOADER]   success:", res.success)
+        print("[KEY LOADER]   message:", res.message or "нет")
+        print("[KEY LOADER]   githubToken:", res.githubToken and "есть" or "нет")
         
         if res.success then
             print("[KEY LOADER] ✅ Ключ валидный!")
-            Fluent:Notify({Title = "✅ Успешно!", Content = "Ключ активирован!", Duration = 2})
+            Fluent:Notify({Title = "✅ Успешно!", Content = "Ключ активирован! Загрузка ESP...", Duration = 2})
             
             saveKey(keyInput)
-            print("[KEY LOADER] Ключ сохранен")
+            print("[KEY LOADER] Ключ сохранен в файл")
             
             _G.ESP_USER_KEY = keyInput
+            _G.ESP_SERVER_URL = SERVER_URL
             _G.ESP_GITHUB_TOKEN = res.githubToken or ""
-            print("[KEY LOADER] Глобальные переменные установлены")
+            print("[KEY LOADER] Глобальные переменные установлены:")
+            print("[KEY LOADER]   _G.ESP_USER_KEY =", _G.ESP_USER_KEY)
+            print("[KEY LOADER]   _G.ESP_SERVER_URL =", _G.ESP_SERVER_URL)
+            print("[KEY LOADER]   _G.ESP_GITHUB_TOKEN =", _G.ESP_GITHUB_TOKEN and "установлен" or "пустой")
             
             task.wait(0.5)
             print("[KEY LOADER] Закрываем GUI...")
-            local closeOk = pcall(function() 
+            pcall(function() 
                 if Window then
                     Window:Destroy()
                     print("[KEY LOADER] GUI закрыт")
                 end
             end)
-            if not closeOk then
-                print("[KEY LOADER] Не удалось закрыть GUI")
-            end
             
             task.wait(0.5)
-            print("[KEY LOADER] Загружаем скрипт...")
+            print("[KEY LOADER] ===== ЗАГРУЗКА СКРИПТА =====")
             
             local scriptLoaded = loadScript(res.githubToken or "")
             if scriptLoaded then
-                print("[KEY LOADER] ✅ ESP загружен успешно!")
+                print("[KEY LOADER] ===== ✅ ВСЁ УСПЕШНО! =====")
             else
-                print("[KEY LOADER] ❌ Не удалось загрузить ESP")
-                player:Kick("❌ Не удалось загрузить ESP")
+                print("[KEY LOADER] ===== ❌ ОШИБКА ЗАГРУЗКИ =====")
+                Fluent:Notify({Title = "❌ Ошибка", Content = "Не удалось загрузить ESP. Проверьте консоль (F9)", Duration = 8})
+                warn("[KEY LOADER] РЕШЕНИЕ: Проверьте URL в SCRIPT_URL и доступность GitHub")
             end
         else
-            print("[KEY LOADER] ❌ Ключ невалидный:", res.message or "Unknown error")
+            print("[KEY LOADER] ❌ Ключ невалидный")
+            print("[KEY LOADER] Причина:", res.message or "Unknown error")
             Fluent:Notify({Title = "❌ Ошибка", Content = res.message or "Неверный ключ", Duration = 5})
         end
     end
