@@ -1,6 +1,5 @@
 -- ============================================
--- 🔑 FIRMA MODE KEY LOADER - FLUENT UI
--- Premium Design with Fluent Library
+-- 🔑 FIRMA MODE KEY LOADER - FINAL VERSION
 -- ============================================
 
 local SERVER_URL = "https://esp-ultra-server.onrender.com"
@@ -13,116 +12,68 @@ local player = Players.LocalPlayer
 -- Key Storage
 local KeyStorageFile = "FirmaModeKey.txt"
 
--- Utility Functions
+-- Functions
 local function makeRequest(endpoint, data)
-    -- Пробуем до 3 раз (для пробуждения Render.com сервера)
-    for attempt = 1, 3 do
-        if attempt > 1 then
-            print("⏳ Попытка", attempt, "- сервер просыпается...")
-            task.wait(20)
-        end
-        
-        local success, result = pcall(function()
-            local response = request({
-                Url = SERVER_URL .. endpoint,
-                Method = "POST",
-                Headers = {["Content-Type"] = "application/json"},
-                Body = HttpService:JSONEncode(data)
-            })
-            return HttpService:JSONDecode(response.Body)
-        end)
-        
-        if success and result then
-            return result
-        end
-    end
-    
-    return nil
+    local success, result = pcall(function()
+        local response = request({
+            Url = SERVER_URL .. endpoint,
+            Method = "POST",
+            Headers = {["Content-Type"] = "application/json"},
+            Body = HttpService:JSONEncode(data),
+            Timeout = 60000
+        })
+        return HttpService:JSONDecode(response.Body)
+    end)
+    return success and result or nil
 end
 
 local function saveKey(key)
-    local success = pcall(function()
-        writefile(KeyStorageFile, key)
-    end)
-    return success
+    pcall(function() writefile(KeyStorageFile, key) end)
 end
 
 local function loadKey()
-    local success, key = pcall(function()
-        return readfile(KeyStorageFile)
-    end)
-    return success and key or nil
+    local ok, key = pcall(function() return readfile(KeyStorageFile) end)
+    return ok and key or nil
 end
 
 local function deleteKey()
-    pcall(function()
-        delfile(KeyStorageFile)
-    end)
+    pcall(function() delfile(KeyStorageFile) end)
 end
 
-local function loadMainScript(token)
-    local scriptCode
+local function loadScript(token)
+    local code
     if token and token ~= "" then
-        local ok, result = pcall(function()
-            return request({
-                Url = SCRIPT_URL,
-                Method = "GET",
-                Headers = {["Authorization"] = "token " .. token}
-            }).Body
+        local ok, r = pcall(function()
+            return request({Url = SCRIPT_URL, Method = "GET", Headers = {["Authorization"] = "token " .. token}}).Body
         end)
-        if ok then scriptCode = result end
+        if ok then code = r end
     else
-        local ok, result = pcall(function()
-            return game:HttpGet(SCRIPT_URL, true)
-        end)
-        if ok then scriptCode = result end
+        local ok, r = pcall(function() return game:HttpGet(SCRIPT_URL, true) end)
+        if ok then code = r end
     end
-    
-    if scriptCode then
-        local loadFunc = loadstring(scriptCode)
-        if loadFunc then
-            loadFunc()
-            return true
-        end
+    if code then
+        local f = loadstring(code)
+        if f then f() return true end
     end
     return false
 end
 
--- Try auto-login with saved key
+-- Auto-login
 local savedKey = loadKey()
 if savedKey then
-    print("🔑 Найден сохраненный ключ, проверка...")
-    
     local hwid = game:GetService("RbxAnalyticsService"):GetClientId()
-    local response = makeRequest("/api/validate", {
-        key = savedKey,
-        hwid = hwid,
-        userId = player.UserId,
-        game = game.PlaceId
-    })
-    
-    if response and response.success then
-        print("✅ Ключ валидный! Автоматический вход...")
+    local res = makeRequest("/api/validate", {key = savedKey, hwid = hwid, userId = player.UserId, game = game.PlaceId})
+    if res and res.success then
         _G.ESP_USER_KEY = savedKey
-        _G.ESP_GITHUB_TOKEN = response.githubToken
-        
-        if loadMainScript(response.githubToken) then
-            print("✅ ESP загружен автоматически!")
-            return -- Exit script, don't show GUI
-        end
+        _G.ESP_GITHUB_TOKEN = res.githubToken
+        if loadScript(res.githubToken) then return end
     else
-        print("❌ Сохраненный ключ больше не действителен")
         deleteKey()
     end
 end
 
--- If we're here, show the key loader GUI
-print("📱 Загрузка GUI для ввода ключа...")
-
--- Load Fluent UI Library
+-- Load Fluent UI
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
-local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
-local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
 
 -- Create Window
 local Window = Fluent:CreateWindow({
@@ -135,201 +86,87 @@ local Window = Fluent:CreateWindow({
     MinimizeKey = Enum.KeyCode.LeftControl
 })
 
--- Create Tabs
 local Tabs = {
     Main = Window:AddTab({ Title = "Key System", Icon = "key" }),
     Credits = Window:AddTab({ Title = "Credits", Icon = "users" })
 }
 
--- Variables
 local keyInput = ""
-local isValidating = false
 
--- Main Tab Content
+-- Main Tab
 Tabs.Main:AddParagraph({
     Title = "🔑 Получить ключ",
-    Content = "Для получения бесплатного ключа, скопируйте наш Telegram канал и напишите нам. Ключ будет отправлен в течение нескольких минут."
+    Content = "Скопируйте Telegram и напишите для получения ключа."
 })
 
 Tabs.Main:AddButton({
     Title = "📱 Копировать Telegram",
-    Description = "Нажмите чтобы скопировать ссылку",
     Callback = function()
         setclipboard("https://t.me/firmamodee")
-        Fluent:Notify({
-            Title = "✅ Успешно!",
-            Content = "Telegram ссылка скопирована в буфер обмена",
-            Duration = 3
-        })
+        Fluent:Notify({Title = "✅ Скопировано", Content = "Telegram ссылка в буфере", Duration = 3})
     end
 })
 
-Tabs.Main:AddParagraph({
-    Title = "🔐 Активация ключа",
-    Content = "Введите полученный ключ в поле ниже и нажмите кнопку активации."
-})
+Tabs.Main:AddParagraph({Title = "🔐 Активация", Content = "Введите ключ и нажмите активировать."})
 
-local KeyInput = Tabs.Main:AddInput("KeyInput", {
+Tabs.Main:AddInput("KeyInput", {
     Title = "Ключ активации",
-    Default = "",
     Placeholder = "XXXX-XXXX-XXXX-XXXX",
-    Numeric = false,
-    Finished = false,
-    Callback = function(Value)
-        keyInput = Value
-    end
+    Callback = function(v) keyInput = v end
 })
-
 
 Tabs.Main:AddButton({
     Title = "🚀 Активировать ключ",
-    Description = "Проверить и активировать ключ",
     Callback = function()
-        if isValidating then
-            Fluent:Notify({
-                Title = "⚠️ Подождите",
-                Content = "Идет проверка ключа...",
-                Duration = 2
-            })
-            return
-        end
-        
         if keyInput == "" or #keyInput < 10 then
-            Fluent:Notify({
-                Title = "❌ Ошибка",
-                Content = "Введите корректный ключ активации",
-                Duration = 3
-            })
+            Fluent:Notify({Title = "❌ Ошибка", Content = "Введите корректный ключ", Duration = 3})
             return
         end
         
-        isValidating = true
-        
-        Fluent:Notify({
-            Title = "⏳ Проверка ключа",
-            Content = "Подождите, идет проверка на сервере...",
-            Duration = 2
-        })
+        Fluent:Notify({Title = "⏳ Проверка", Content = "Ожидание ответа (до 60 сек)...", Duration = 5})
         
         local hwid = game:GetService("RbxAnalyticsService"):GetClientId()
-        local response = makeRequest("/api/validate", {
-            key = keyInput,
-            hwid = hwid,
-            userId = player.UserId,
-            game = game.PlaceId
-        })
+        local res = makeRequest("/api/validate", {key = keyInput, hwid = hwid, userId = player.UserId, game = game.PlaceId})
         
-        isValidating = false
-        
-        if response and response.success then
-            Fluent:Notify({
-                Title = "✅ Ключ активирован!",
-                Content = "Загрузка ESP системы...",
-                Duration = 2
-            })
+        if res and res.success then
+            Fluent:Notify({Title = "✅ Успешно!", Content = "Ключ активирован!", Duration = 2})
+            saveKey(keyInput)
             
-            -- Save key for future use
-            if saveKey(keyInput) then
-                print("💾 Ключ сохранен для автоматического входа")
-            end
-            
-            task.wait(0.5)
-            
-            -- Set global variables
             _G.ESP_USER_KEY = keyInput
-            _G.ESP_GITHUB_TOKEN = response.githubToken
+            _G.ESP_GITHUB_TOKEN = res.githubToken
             
-            -- Close window BEFORE loading script
-            pcall(function() 
-                Window:Destroy() 
-            end)
+            task.wait(0.5)
+            pcall(function() Window:Destroy() end)
             task.wait(0.5)
             
-            -- Load main script
-            if loadMainScript(response.githubToken) then
-                print("✅ ESP загружен успешно!")
-            else
-                player:Kick("❌ Не удалось загрузить ESP. Попробуйте снова.")
+            if not loadScript(res.githubToken) then
+                player:Kick("❌ Не удалось загрузить ESP")
             end
         else
-            local errorMsg = response and response.message or "Неверный ключ или истек срок действия"
-            Fluent:Notify({
-                Title = "❌ Активация не удалась",
-                Content = errorMsg,
-                Duration = 5
-            })
+            Fluent:Notify({Title = "❌ Ошибка", Content = res and res.message or "Неверный ключ", Duration = 5})
         end
     end
 })
 
-
 -- Credits Tab
-Tabs.Credits:AddParagraph({
-    Title = "👑 Owner",
-    Content = "firmamodee - Создатель и владелец проекта"
-})
-
+Tabs.Credits:AddParagraph({Title = "👑 Owner", Content = "firmamodee - Создатель проекта"})
 Tabs.Credits:AddButton({
     Title = "📱 Telegram: firmamodee",
-    Description = "Связаться с владельцем",
     Callback = function()
         setclipboard("https://t.me/firmamodee")
-        Fluent:Notify({
-            Title = "✅ Скопировано",
-            Content = "Telegram владельца скопирован",
-            Duration = 2
-        })
+        Fluent:Notify({Title = "✅ Скопировано", Duration = 2})
     end
 })
 
-Tabs.Credits:AddParagraph({
-    Title = "🧪 Tester",
-    Content = "tgvetov - Тестировщик и помощник проекта"
-})
-
-Tabs.Credits:AddParagraph({
-    Title = "💻 ESP Creator",
-    Content = "ecto - Разработчик ESP системы"
-})
-
-Tabs.Credits:AddParagraph({
-    Title = "📊 Статистика проекта",
-    Content = "• Активных пользователей: 1000+\n• Версия: 2.0\n• Последнее обновление: " .. os.date("%d.%m.%Y")
-})
-
-Tabs.Credits:AddParagraph({
-    Title = "⚙️ Возможности ESP",
-    Content = "• ESP на легендарные вещи\n• ESP на аксессуары\n• Чамсы и трассеры\n• Спидхак\n• Fast Take\n• Автообновление"
-})
+Tabs.Credits:AddParagraph({Title = "🧪 Tester", Content = "tgvetov - Тестировщик"})
+Tabs.Credits:AddParagraph({Title = "💻 ESP Creator", Content = "ecto - Разработчик ESP"})
 
 Tabs.Credits:AddButton({
     Title = "🗑️ Удалить сохраненный ключ",
-    Description = "Очистить кэш и выйти из аккаунта",
     Callback = function()
         deleteKey()
-        Fluent:Notify({
-            Title = "✅ Успешно",
-            Content = "Сохраненный ключ удален. При следующем запуске нужно будет ввести ключ заново.",
-            Duration = 5
-        })
+        Fluent:Notify({Title = "✅ Удалено", Content = "Ключ удален", Duration = 3})
     end
 })
 
--- Welcome notification
-Fluent:Notify({
-    Title = "🔥 FIRMA MODE",
-    Content = "Добро пожаловать в систему активации ключей!",
-    Duration = 5
-})
-
--- Info
-print("==========================================")
-print("🔥 FIRMA MODE KEY LOADER - FLUENT UI")
-print("==========================================")
-print("👑 OWNER: firmamodee")
-print("🧪 TESTER: tgvetov")
-print("💻 CREATOR ESP: ecto")
-print("==========================================")
-print("✅ GUI загружен успешно!")
-print("📱 Telegram: https://t.me/firmamodee")
-print("==========================================")
+Fluent:Notify({Title = "🔥 FIRMA MODE", Content = "Добро пожаловать!", Duration = 5})
