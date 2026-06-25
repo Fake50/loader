@@ -15,16 +15,29 @@ local KeyStorageFile = "FirmaModeKey.txt"
 
 -- Utility Functions
 local function makeRequest(endpoint, data)
-    local success, result = pcall(function()
-        local response = request({
-            Url = SERVER_URL .. endpoint,
-            Method = "POST",
-            Headers = {["Content-Type"] = "application/json"},
-            Body = HttpService:JSONEncode(data)
-        })
-        return HttpService:JSONDecode(response.Body)
-    end)
-    return success and result or nil
+    -- Пробуем до 3 раз (для пробуждения Render.com сервера)
+    for attempt = 1, 3 do
+        if attempt > 1 then
+            print("⏳ Попытка", attempt, "- сервер просыпается...")
+            task.wait(20)
+        end
+        
+        local success, result = pcall(function()
+            local response = request({
+                Url = SERVER_URL .. endpoint,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = HttpService:JSONEncode(data)
+            })
+            return HttpService:JSONDecode(response.Body)
+        end)
+        
+        if success and result then
+            return result
+        end
+    end
+    
+    return nil
 end
 
 local function saveKey(key)
