@@ -1,236 +1,287 @@
 -- ============================================
--- 🔒 ЗАЩИЩЕННЫЙ ЛОАДЕР С ПЕРЕДАЧЕЙ КОДА
+-- 🔑 FIRMA MODE KEY LOADER - FINAL VERSION
 -- ============================================
 
-local HttpService = game:GetService("HttpService")
+local SERVER_URL = "https://esp-ultra-server.onrender.com"
+local SCRIPT_URL = "https://raw.githubusercontent.com/Fake50/ESP-BY-FIRMA-MODE/refs/heads/main/ESP"
+
 local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local player = Players.LocalPlayer
 
--- ============================================
--- КОНФИГУРАЦИЯ
--- ============================================
-local SERVER_URL = "https://your-render-server.onrender.com" -- ЗАМЕНИТЕ НА ВАШ URL
+-- Key Storage
+local KeyStorageFile = "FirmaModeKey.txt"
 
--- ============================================
--- ГЕНЕРАЦИЯ HWID
--- ============================================
-local function getHWID()
-    local success, result = pcall(function()
-        local parts = {
-            game:GetService("RbxAnalyticsService"):GetClientId(),
-            tostring(game:GetService("UserInputService"):GetGamepadState(Enum.UserInputType.Gamepad1)),
-            tostring(game.JobId),
-            tostring(game.PlaceId)
-        }
-        
-        local combined = table.concat(parts, "|")
-        local hash = 0
-        
-        for i = 1, #combined do
-            hash = ((hash * 31) + string.byte(combined, i)) % 2147483647
-        end
-        
-        return string.format("%X", hash)
-    end)
+-- Functions
+local function makeRequest(endpoint, data)
+    print("[REQUEST] Запрос к:", SERVER_URL .. endpoint)
     
-    return success and result or "FALLBACK_" .. tostring(math.random(100000, 999999))
-end
-
--- ============================================
--- ХЭШИРОВАНИЕ
--- ============================================
-local function sha256(data)
-    -- Простой хэш (в реальности используйте библиотеку)
-    local hash = 0
-    for i = 1, #data do
-        hash = ((hash * 31) + string.byte(data, i)) % 2147483647
-    end
-    return string.format("%x", hash)
-end
-
--- ============================================
--- HTTP ЗАПРОС
--- ============================================
-local function request(endpoint, data)
-    local success, response = pcall(function()
-        return HttpService:RequestAsync({
+    local success, result = pcall(function()
+        local response = request({
             Url = SERVER_URL .. endpoint,
             Method = "POST",
-            Headers = {
-                ["Content-Type"] = "application/json"
-            },
+            Headers = {["Content-Type"] = "application/json"},
             Body = HttpService:JSONEncode(data)
         })
-    end)
-    
-    if success and response.Success then
-        local parseSuccess, result = pcall(function()
-            return HttpService:JSONDecode(response.Body)
-        end)
         
-        if parseSuccess then
-            return true, result
+        print("[REQUEST] StatusCode:", response.StatusCode)
+        print("[REQUEST] Body:", response.Body:sub(1, 200))
+        
+        return HttpService:JSONDecode(response.Body)
+    end)
+    
+    if success and result then
+        print("[REQUEST] ✅ Успешный ответ")
+        return result
+    else
+        warn("[REQUEST] ❌ Ошибка:", result)
+        return nil
+    end
+end
+
+local function saveKey(key)
+    pcall(function() writefile(KeyStorageFile, key) end)
+end
+
+local function loadKey()
+    local ok, key = pcall(function() return readfile(KeyStorageFile) end)
+    return ok and key or nil
+end
+
+local function deleteKey()
+    pcall(function() delfile(KeyStorageFile) end)
+end
+
+local function loadScript(token)
+    print("[LOAD SCRIPT] Начинаем загрузку с:", SCRIPT_URL)
+    print("[LOAD SCRIPT] Token:", token and "есть" or "нет")
+    
+    local code
+    if token and token ~= "" then
+        print("[LOAD SCRIPT] Пытаемся загрузить с токеном (приватный репо)")
+        local ok, r = pcall(function()
+            return request({Url = SCRIPT_URL, Method = "GET", Headers = {["Authorization"] = "token " .. token}}).Body
+        end)
+        if ok then 
+            code = r
+            print("[LOAD SCRIPT] ✅ Загружено с токеном, размер:", #code)
+        else
+            warn("[LOAD SCRIPT] ❌ Ошибка загрузки с токеном:", r)
+        end
+    else
+        print("[LOAD SCRIPT] Пытаемся загрузить без токена (публичный репо)")
+        local ok, r = pcall(function() return game:HttpGet(SCRIPT_URL, true) end)
+        if ok then 
+            code = r
+            print("[LOAD SCRIPT] ✅ Загружено без токена, размер:", #code)
+        else
+            warn("[LOAD SCRIPT] ❌ Ошибка загрузки без токена:", r)
         end
     end
     
-    return false, nil
-end
-
--- ============================================
--- РАСШИФРОВКА КОДА
--- ============================================
-local function decryptCode(encryptedCode, sessionKey)
-    -- Здесь должна быть расшифровка AES-256
-    -- Для простоты используем base64 decode (ЗАМЕНИТЕ НА AES!)
-    
-    -- ВАЖНО: В продакшене используйте библиотеку AES!
-    -- https://github.com/mpeterv/aeslua
-    
-    local success, decrypted = pcall(function()
-        -- Временная заглушка - в реальности расшифровываем
-        return encryptedCode
-    end)
-    
-    return success and decrypted or nil
-end
-
--- ============================================
--- ОСНОВНАЯ СИСТЕМА
--- ============================================
-local KeySystem = {}
-KeySystem.Active = false
-KeySystem.Token = nil
-KeySystem.SessionKey = nil
-KeySystem.HWID = nil
-
--- ============================================
--- АКТИВАЦИЯ КЛЮЧА
--- ============================================
-function KeySystem.Activate(key)
-    local hwid = getHWID()
-    local userId = Players.LocalPlayer.UserId
-    
-    -- Активация на сервере
-    local success, response = request("/activate", {
-        key = key,
-        hwid = hwid,
-        userId = userId
-    })
-    
-    if not success or not response.success then
-        return false, response and response.error or "Server error"
-    end
-    
-    -- Сохраняем данные сессии
-    KeySystem.Token = response.token
-    KeySystem.SessionKey = response.sessionKey
-    KeySystem.HWID = hwid
-    KeySystem.Active = true
-    
-    return true, "Activated successfully"
-end
-
--- ============================================
--- ЗАГРУЗКА КОДА С СЕРВЕРА
--- ============================================
-function KeySystem.LoadScript()
-    if not KeySystem.Active then
-        return false, "Not activated"
-    end
-    
-    -- Создаем подпись для защиты от перехвата
-    local signature = sha256(KeySystem.Token .. KeySystem.SessionKey .. KeySystem.HWID)
-    
-    -- Запрашиваем код
-    local success, response = request("/getcode", {
-        token = KeySystem.Token,
-        signature = signature
-    })
-    
-    if not success or not response.success then
-        KeySystem.Active = false
-        return false, response and response.error or "Failed to get code"
-    end
-    
-    -- Расшифровываем код
-    local decrypted = decryptCode(response.code, KeySystem.SessionKey)
-    if not decrypted then
-        return false, "Decryption failed"
-    end
-    
-    -- Выполняем код
-    local loadSuccess, loadError = pcall(function()
-        loadstring(decrypted)()
-    end)
-    
-    if not loadSuccess then
-        return false, "Execution error: " .. tostring(loadError)
-    end
-    
-    return true, "Script loaded"
-end
-
--- ============================================
--- HEARTBEAT СИСТЕМА
--- ============================================
-local heartbeatRunning = false
-
-function KeySystem.StartHeartbeat()
-    if heartbeatRunning then return end
-    heartbeatRunning = true
-    
-    task.spawn(function()
-        while KeySystem.Active and heartbeatRunning do
-            task.wait(30) -- Каждые 30 секунд
-            
-            local success, response = request("/heartbeat", {
-                token = KeySystem.Token
-            })
-            
-            if not success or not response.success then
-                KeySystem.Active = false
-                heartbeatRunning = false
-                
-                Players.LocalPlayer:Kick("Session expired. Restart game.")
-                break
+    if code then
+        print("[LOAD SCRIPT] Проверяем код...")
+        print("[LOAD SCRIPT] Первые 200 символов:", code:sub(1, 200))
+        
+        local f, err = loadstring(code)
+        if f then 
+            print("[LOAD SCRIPT] ✅ Код скомпилирован, запускаем...")
+            local runOk, runErr = pcall(f)
+            if runOk then
+                print("[LOAD SCRIPT] ✅ Скрипт запущен успешно!")
+                return true
+            else
+                warn("[LOAD SCRIPT] ❌ Ошибка выполнения скрипта:", runErr)
+                return false
             end
+        else
+            warn("[LOAD SCRIPT] ❌ Ошибка компиляции:", err)
+            return false
         end
-    end)
-end
-
-function KeySystem.StopHeartbeat()
-    heartbeatRunning = false
-    KeySystem.Active = false
-end
-
--- ============================================
--- ПРОВЕРКА СТАТУСА
--- ============================================
-function KeySystem.CheckStatus()
-    if not KeySystem.Token then
+    else
+        warn("[LOAD SCRIPT] ❌ Не удалось получить код")
         return false
     end
-    
-    local success, response = request("/status", {
-        token = KeySystem.Token
-    })
-    
-    return success and response.success and response.active
 end
 
--- ============================================
--- AUTO-CLEANUP ПРИ ВЫХОДЕ
--- ============================================
-Players.LocalPlayer.AncestryChanged:Connect(function()
-    if not Players.LocalPlayer:IsDescendantOf(game) then
-        KeySystem.StopHeartbeat()
+-- Auto-login
+print("[AUTO-LOGIN] Проверяем сохраненный ключ...")
+local savedKey = loadKey()
+if savedKey then
+    print("[AUTO-LOGIN] Найден сохраненный ключ:", savedKey)
+    local hwid = game:GetService("RbxAnalyticsService"):GetClientId()
+    print("[AUTO-LOGIN] HWID:", hwid)
+    print("[AUTO-LOGIN] Отправляем запрос на проверку...")
+    
+    local res = makeRequest("/api/validate", {key = savedKey, hwid = hwid, userId = player.UserId, game = game.PlaceId})
+    
+    if res and res.success then
+        print("[AUTO-LOGIN] ✅ Ключ валидный! Автозагрузка...")
+        _G.ESP_USER_KEY = savedKey
+        _G.ESP_SERVER_URL = SERVER_URL
+        _G.ESP_GITHUB_TOKEN = res.githubToken
+        print("[AUTO-LOGIN] Глобальные переменные установлены")
+        print("[AUTO-LOGIN] Загружаем скрипт...")
+        
+        if loadScript(res.githubToken) then
+            print("[AUTO-LOGIN] ✅ ESP загружен через автовход!")
+            return
+        else
+            warn("[AUTO-LOGIN] ❌ Не удалось загрузить ESP")
+        end
+    else
+        print("[AUTO-LOGIN] ❌ Ключ невалидный или истек, удаляем...")
+        deleteKey()
     end
-end)
+else
+    print("[AUTO-LOGIN] Сохраненный ключ не найден")
+end
 
-game:BindToClose(function()
-    KeySystem.StopHeartbeat()
-end)
+print("[AUTO-LOGIN] Показываем Key System GUI...")
 
--- ============================================
--- ВОЗВРАТ СИСТЕМЫ
--- ============================================
-return KeySystem
+-- Load Fluent UI
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+
+-- Create Window
+local Window = Fluent:CreateWindow({
+    Title = "FIRMA MODE - Key System",
+    SubTitle = "Premium Key + ESP",
+    TabWidth = 160,
+    Size = UDim2.fromOffset(580, 460),
+    Acrylic = false,
+    Theme = "Darker",
+    MinimizeKey = Enum.KeyCode.LeftControl
+})
+
+local Tabs = {
+    Main = Window:AddTab({ Title = "Key System", Icon = "key" }),
+    Credits = Window:AddTab({ Title = "Credits", Icon = "users" })
+}
+
+local keyInput = ""
+
+-- Main Tab
+Tabs.Main:AddParagraph({
+    Title = "🔑 Получить ключ",
+    Content = "Скопируйте Telegram и напишите для получения ключа."
+})
+
+Tabs.Main:AddButton({
+    Title = "📱 Копировать Telegram",
+    Callback = function()
+        setclipboard("https://t.me/firmamodee")
+        Fluent:Notify({Title = "✅ Скопировано", Content = "Telegram ссылка в буфере", Duration = 3})
+    end
+})
+
+Tabs.Main:AddParagraph({Title = "🔐 Активация", Content = "Введите ключ и нажмите активировать."})
+
+Tabs.Main:AddInput("KeyInput", {
+    Title = "Ключ активации",
+    Placeholder = "XXXX-XXXX-XXXX-XXXX",
+    Callback = function(v) keyInput = v end
+})
+
+Tabs.Main:AddButton({
+    Title = "🚀 Активировать ключ",
+    Callback = function()
+        if keyInput == "" or #keyInput < 10 then
+            Fluent:Notify({Title = "❌ Ошибка", Content = "Введите корректный ключ", Duration = 3})
+            return
+        end
+        
+        print("[KEY LOADER] ===== НАЧАЛО АКТИВАЦИИ =====")
+        print("[KEY LOADER] Ключ:", keyInput)
+        Fluent:Notify({Title = "⏳ Проверка", Content = "Проверка ключа на сервере...", Duration = 3})
+        
+        local hwid = game:GetService("RbxAnalyticsService"):GetClientId()
+        print("[KEY LOADER] HWID:", hwid)
+        print("[KEY LOADER] UserID:", player.UserId)
+        print("[KEY LOADER] PlaceID:", game.PlaceId)
+        
+        local requestData = {
+            key = keyInput,
+            hwid = hwid,
+            userId = player.UserId,
+            game = game.PlaceId
+        }
+        
+        print("[KEY LOADER] Отправка запроса на сервер...")
+        local res = makeRequest("/api/validate", requestData)
+        
+        if not res then
+            print("[KEY LOADER] ❌ Сервер не ответил")
+            Fluent:Notify({Title = "❌ Ошибка", Content = "Сервер не отвечает. Проверьте консоль (F9)", Duration = 5})
+            return
+        end
+        
+        print("[KEY LOADER] Ответ сервера:")
+        print("[KEY LOADER]   success:", res.success)
+        print("[KEY LOADER]   message:", res.message or "нет")
+        print("[KEY LOADER]   githubToken:", res.githubToken and "есть" or "нет")
+        
+        if res.success then
+            print("[KEY LOADER] ✅ Ключ валидный!")
+            Fluent:Notify({Title = "✅ Успешно!", Content = "Ключ активирован! Загрузка ESP...", Duration = 2})
+            
+            saveKey(keyInput)
+            print("[KEY LOADER] Ключ сохранен в файл")
+            
+            _G.ESP_USER_KEY = keyInput
+            _G.ESP_SERVER_URL = SERVER_URL
+            _G.ESP_GITHUB_TOKEN = res.githubToken or ""
+            print("[KEY LOADER] Глобальные переменные установлены:")
+            print("[KEY LOADER]   _G.ESP_USER_KEY =", _G.ESP_USER_KEY)
+            print("[KEY LOADER]   _G.ESP_SERVER_URL =", _G.ESP_SERVER_URL)
+            print("[KEY LOADER]   _G.ESP_GITHUB_TOKEN =", _G.ESP_GITHUB_TOKEN and "установлен" or "пустой")
+            
+            task.wait(0.5)
+            print("[KEY LOADER] Закрываем GUI...")
+            pcall(function() 
+                if Window then
+                    Window:Destroy()
+                    print("[KEY LOADER] GUI закрыт")
+                end
+            end)
+            
+            task.wait(0.5)
+            print("[KEY LOADER] ===== ЗАГРУЗКА СКРИПТА =====")
+            
+            local scriptLoaded = loadScript(res.githubToken or "")
+            if scriptLoaded then
+                print("[KEY LOADER] ===== ✅ ВСЁ УСПЕШНО! =====")
+            else
+                print("[KEY LOADER] ===== ❌ ОШИБКА ЗАГРУЗКИ =====")
+                Fluent:Notify({Title = "❌ Ошибка", Content = "Не удалось загрузить ESP. Проверьте консоль (F9)", Duration = 8})
+                warn("[KEY LOADER] РЕШЕНИЕ: Проверьте URL в SCRIPT_URL и доступность GitHub")
+            end
+        else
+            print("[KEY LOADER] ❌ Ключ невалидный")
+            print("[KEY LOADER] Причина:", res.message or "Unknown error")
+            Fluent:Notify({Title = "❌ Ошибка", Content = res.message or "Неверный ключ", Duration = 5})
+        end
+    end
+})
+
+-- Credits Tab
+Tabs.Credits:AddParagraph({Title = "👑 Owner", Content = "firmamodee - Создатель проекта"})
+Tabs.Credits:AddButton({
+    Title = "📱 Telegram: firmamodee",
+    Callback = function()
+        setclipboard("https://t.me/firmamodee")
+        Fluent:Notify({Title = "✅ Скопировано", Duration = 2})
+    end
+})
+
+Tabs.Credits:AddParagraph({Title = "🧪 Tester", Content = "tgvetov - Тестировщик"})
+Tabs.Credits:AddParagraph({Title = "💻 ESP Creator", Content = "ecto - Разработчик ESP"})
+
+Tabs.Credits:AddButton({
+    Title = "🗑 Удалить сохраненный ключ",
+    Callback = function()
+        deleteKey()
+        Fluent:Notify({Title = "✅ Удалено", Content = "Ключ удален", Duration = 3})
+    end
+})
+
+Fluent:Notify({Title = "🔥 FIRMA MODE", Content = "Добро пожаловать!", Duration = 5})
